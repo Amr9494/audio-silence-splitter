@@ -41,7 +41,7 @@ min_silence_len = st.sidebar.slider(
     "Minimum Silence Length (ms)",
     min_value=200,
     max_value=4000,
-    value=1500,
+    value=500,
     step=50,
     help="Duration of silence (in ms) required to create a split."
 )
