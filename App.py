@@ -12,7 +12,18 @@ st.set_page_config(
     page_icon="✂️",
     layout="wide"
 )
+import streamlit as st
 
+# Custom web app metadata & high-resolution touch icon
+st.markdown("""
+    <head>
+        <title>Attendance Sheet</title>
+        <link rel="apple-touch-icon" href="https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f4cb.png">
+        <link rel="icon" type="image/png" href="https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/2702.png">
+        <meta name="apple-mobile-web-app-title" content="Attendance">
+        <meta name="application-name" content="Attendance">
+    </head>
+""", unsafe_allow_html=True)
 # Custom CSS for an enhanced Drag-and-Drop zone
 st.markdown("""
 <style>
