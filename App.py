@@ -31,7 +31,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("✂️ Audio Silence Splitter")
-st.write("Drag and drop your audio file(s) below, adjust parameters, and export your segmented MP3 chunks.")
+st.write("Drag and drop your audio file(s) below, adjust parameters, preview slices, and export your named MP3 chunks.")
 
 # --- Sidebar Controls ---
 st.sidebar.header("⚙️ Split Settings")
@@ -70,11 +70,18 @@ uploaded_files = st.file_uploader(
 )
 
 if uploaded_files:
-    st.info(f"Loaded **{len(uploaded_files)}** file(s) for processing.")
+    # 1. Preview Original Uploaded Files
+    st.subheader("🎵 Uploaded Audio Preview")
+    for f in uploaded_files:
+        st.write(f"**File:** `{f.name}`")
+        st.audio(f)
     
+    st.markdown("---")
+
     if st.button("🚀 Process & Split Audio", type="primary", use_container_width=True):
         zip_buffer = io.BytesIO()
         total_extracted_chunks = 0
+        all_results_for_preview = []  # Stores (page_num, file_name, chunks_data)
         
         with st.spinner("Processing audio files and analyzing silence..."):
             with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
@@ -83,7 +90,7 @@ if uploaded_files:
                     current_page = page_number + file_idx
                     file_suffix = "." + uploaded_file.name.split(".")[-1].lower()
                     
-                    # Write to a clean temporary file on disk
+                    # Write to a temporary file on disk for reliable mobile decoding
                     with tempfile.NamedTemporaryFile(delete=False, suffix=file_suffix) as tmp_file:
                         tmp_file.write(uploaded_file.getbuffer())
                         tmp_path = tmp_file.name
@@ -105,13 +112,19 @@ if uploaded_files:
                             continue
 
                         total_extracted_chunks += len(chunks)
+                        file_chunk_previews = []
                         
-                        # Store chunks in the ZIP archive
+                        # Store chunks in the ZIP archive & buffer for browser preview
                         for chunk_idx, chunk in enumerate(chunks, start=1):
                             chunk_name = f"{current_page}_{chunk_idx}.mp3"
                             chunk_buffer = io.BytesIO()
                             chunk.export(chunk_buffer, format="mp3")
-                            zip_file.writestr(f"page_{current_page}_words/{chunk_name}", chunk_buffer.getvalue())
+                            chunk_bytes = chunk_buffer.getvalue()
+                            
+                            zip_file.writestr(f"page_{current_page}_words/{chunk_name}", chunk_bytes)
+                            file_chunk_previews.append((chunk_name, len(chunk), chunk_bytes))
+
+                        all_results_for_preview.append((current_page, uploaded_file.name, file_chunk_previews))
 
                     except Exception as err:
                         st.error(f"Error processing {uploaded_file.name}: {err}")
@@ -124,9 +137,22 @@ if uploaded_files:
             st.success(f"🎉 Successfully split into **{total_extracted_chunks}** total audio segments!")
             
             st.download_button(
-                label=f"📥 Download All Split Audio as ZIP",
+                label=f"📥 Download All Split Audio as ZIP ({total_extracted_chunks} Chunks)",
                 data=zip_buffer,
                 file_name="split_audio_words.zip",
                 mime="application/zip",
                 use_container_width=True
             )
+            
+            # 2. Preview Extracted Chunks
+            st.markdown("---")
+            st.subheader("🔊 Extracted Chunk Previews")
+            
+            for curr_page, orig_name, chunk_list in all_results_for_preview:
+                with st.expander(f"📁 Page {curr_page} Chunks (Source: {orig_name}) — {len(chunk_list)} parts", expanded=True):
+                    cols = st.columns(3)
+                    for idx, (c_name, c_duration, c_bytes) in enumerate(chunk_list):
+                        col = cols[idx % 3]
+                        with col:
+                            st.caption(f"**{c_name}** ({c_duration / 1000.0:.2f}s)")
+                            st.audio(c_bytes, format="audio/mp3")
