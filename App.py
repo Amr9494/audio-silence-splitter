@@ -1,65 +1,70 @@
 import io
+import os
+import tempfile
 import zipfile
 import streamlit as st
 from pydub import AudioSegment
 from pydub.silence import split_on_silence
 
-# --- Streamlit Page Configuration ---
-st.set_page_config(page_title="Audio Silence Splitter", page_icon="✂️", layout="centered")
+# --- Page Configuration ---
+st.set_page_config(page_title="Audio Silence Splitter", page_icon="✂️", layout="wide")
 
-st.title("✂️ Audio Silence Splitter & Cutter")
-st.markdown("Upload your audio file, adjust the silence detection parameters, and export indexed MP3 chunks.")
+st.title("✂️ Audio Silence Splitter")
+st.write("Upload an audio file, configure the splitting parameters, and export your named chunks.")
 
-# --- Sidebar / Settings ---
-with st.sidebar:
-    st.header("⚙️ Slicing Parameters")
-    
-    page_num = st.number_input("Page / Section Number", min_value=1, value=14, step=1)
-    
-    min_silence_len = st.slider(
-        "Min Silence Length (ms)",
-        min_value=200,
-        max_value=4000,
-        value=1500,
-        step=100,
-        help="Silence must be at least this long (in milliseconds) to trigger a cut."
-    )
-    
-    thresh_offset = st.slider(
-        "Silence Threshold Offset (dB relative to avg)",
-        min_value=5,
-        max_value=40,
-        value=16,
-        step=1,
-        help="Higher values make it stricter (cuts quieter pauses). Calculated as `dBFS - offset`."
-    )
-    
-    keep_silence = st.slider(
-        "Keep Silence Buffer (ms)",
-        min_value=0,
-        max_value=1000,
-        value=250,
-        step=50,
-        help="Amount of silence padding kept at the start and end of each chunk."
-    )
+# --- Sidebar Controls ---
+st.sidebar.header("⚙️ Split Settings")
+
+page_number = st.sidebar.number_input("Page / Prefix Number", min_value=1, value=14, step=1)
+min_silence_len = st.sidebar.slider(
+    "Minimum Silence Length (ms)",
+    min_value=200,
+    max_value=4000,
+    value=1500,
+    step=50,
+    help="Duration of silence (in ms) needed to trigger a split."
+)
+silence_thresh_offset = st.sidebar.slider(
+    "Silence Threshold Offset (dB below avg)",
+    min_value=5,
+    max_value=40,
+    value=16,
+    step=1,
+    help="How many dB below the average volume is considered silence."
+)
+keep_silence = st.sidebar.slider(
+    "Keep Padding Silence (ms)",
+    min_value=0,
+    max_value=1000,
+    value=250,
+    step=50,
+    help="Silence left at the beginning and end of each slice."
+)
 
 # --- File Uploader ---
-uploaded_file = st.file_uploader("Upload Audio File", type=["m4a", "mp3", "wav", "ogg", "flac"])
+uploaded_file = st.file_uploader(
+    "Upload an audio file (.m4a, .mp3, .wav, .ogg)", 
+    type=["m4a", "mp3", "wav", "ogg"]
+)
 
 if uploaded_file is not None:
-    st.audio(uploaded_file, format=uploaded_file.type)
+    # Tablet Fix: Save uploaded bytes to a robust temporary file on disk
+    file_suffix = "." + uploaded_file.name.split(".")[-1].lower()
+    
+    with tempfile.NamedTemporaryFile(delete=False, suffix=file_suffix) as tmp_file:
+        tmp_file.write(uploaded_file.getbuffer())
+        tmp_path = tmp_file.name
+
+    st.audio(uploaded_file)
     
     if st.button("🚀 Process & Split Audio", type="primary", use_container_width=True):
-        with st.spinner("Analyzing silence and slicing audio..."):
+        with st.spinner("Processing audio and detecting silence..."):
             try:
-                # Load audio from memory buffer
-                file_extension = uploaded_file.name.split(".")[-1].lower()
-                sound = AudioSegment.from_file(uploaded_file, format=file_extension)
+                # Load directly from temporary file path for flawless mobile decoding
+                sound = AudioSegment.from_file(tmp_path)
                 
-                # Dynamic silence threshold calculation
-                silence_thresh = sound.dBFS - thresh_offset
+                silence_thresh = sound.dBFS - silence_thresh_offset
                 
-                # Split audio
                 chunks = split_on_silence(
                     sound,
                     min_silence_len=min_silence_len,
@@ -67,49 +72,48 @@ if uploaded_file is not None:
                     keep_silence=keep_silence
                 )
                 
-                if not chunks:
-                    st.warning("⚠️ No silence detected with the current parameters. Try decreasing the minimum silence duration or adjusting the threshold offset.")
+                num_chunks = len(chunks)
+                
+                if num_chunks == 0:
+                    st.warning("⚠️ No audio segments detected. Try lowering the Silence Threshold Offset or Minimum Silence Length.")
                 else:
-                    st.success(f"✅ Found **{len(chunks)}** chunks!")
+                    st.success(f"🎉 Successfully extracted **{num_chunks}** audio segments!")
                     
-                    # Prepare in-memory ZIP archive
+                    # Create ZIP in memory
                     zip_buffer = io.BytesIO()
                     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-                        
-                        tabs = st.tabs([f"Chunk {i+1}" for i in range(min(len(chunks), 10))] + (["Remaining Chunks"] if len(chunks) > 10 else []))
-                        
-                        for i, chunk in enumerate(chunks):
-                            filename = f"{page_num}_{i + 1}.mp3"
-                            
-                            # Export chunk to byte buffer
+                        for idx, chunk in enumerate(chunks, start=1):
+                            chunk_name = f"{page_number}_{idx}.mp3"
                             chunk_buffer = io.BytesIO()
                             chunk.export(chunk_buffer, format="mp3")
-                            chunk_bytes = chunk_buffer.getvalue()
-                            
-                            # Add to ZIP archive
-                            zip_file.writestr(f"page_{page_num}_words/{filename}", chunk_bytes)
-                            
-                            # Audio player previews for the first 10 chunks
-                            if i < 10:
-                                with tabs[i]:
-                                    st.write(f"**Filename:** `{filename}`")
-                                    st.audio(chunk_bytes, format="audio/mp3")
-                        
-                        if len(chunks) > 10:
-                            with tabs[-1]:
-                                st.info(f"Showing preview for first 10 chunks only. All {len(chunks)} chunks are included in the download ZIP.")
-                    
+                            zip_file.writestr(f"page_{page_number}_words/{chunk_name}", chunk_buffer.getvalue())
+
                     zip_buffer.seek(0)
                     
-                    # Download Button
-                    st.divider()
                     st.download_button(
-                        label=f"📦 Download All Chunks as ZIP (page_{page_num}_words.zip)",
+                        label=f"📥 Download All ({page_number}_1.mp3 to {page_number}_{num_chunks}.mp3) as ZIP",
                         data=zip_buffer,
-                        file_name=f"page_{page_num}_words.zip",
+                        file_name=f"page_{page_number}_words.zip",
                         mime="application/zip",
                         use_container_width=True
                     )
                     
+                    st.markdown("---")
+                    st.subheader("🔊 Chunk Previews")
+                    
+                    cols = st.columns(2)
+                    for idx, chunk in enumerate(chunks, start=1):
+                        col = cols[(idx - 1) % 2]
+                        with col:
+                            chunk_name = f"{page_number}_{idx}.mp3"
+                            chunk_buffer = io.BytesIO()
+                            chunk.export(chunk_buffer, format="mp3")
+                            st.caption(f"**{chunk_name}** ({len(chunk) / 1000.0:.2f}s)")
+                            st.audio(chunk_buffer.getvalue(), format="audio/mp3")
+
             except Exception as e:
                 st.error(f"Error processing audio: {e}")
+            finally:
+                # Clean up temporary disk file
+                if os.path.exists(tmp_path):
+                    os.remove(tmp_path)
